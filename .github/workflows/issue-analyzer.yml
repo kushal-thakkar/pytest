@@ -1,12 +1,12 @@
 name: Issue Analyzer
 on:
   issues:
-    types: [opened, labeled]
+    types: [labeled]
 
 jobs:
   analyze-issue:
     runs-on: ubuntu-latest
-    # FIXME - Add the actual condition to use in order to trigger this workflow
+    # TODO: Add the actual condition to use in order to trigger this workflow
     if: contains(github.event.issue.labels.*.name, 'needs-clarification')
     
     steps:
