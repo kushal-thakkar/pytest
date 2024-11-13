@@ -1,13 +1,13 @@
 name: Issue Analyzer
 on:
   issues:
-    types: [labeled]
+    types: [opened]
 
 jobs:
   analyze-issue:
     runs-on: ubuntu-latest
-    # TODO: Add the actual condition to use in order to trigger this workflow
-    if: contains(github.event.issue.labels.*.name, 'needs-clarification')
+    # TODO: Make it conditional, if required
+    # if: contains(github.event.issue.labels.*.name, 'needs-clarification')
     
     steps:
       - uses: actions/checkout@v4
