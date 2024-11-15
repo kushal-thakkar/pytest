@@ -12,6 +12,13 @@ Here is the post from user:
 {{issue}}
 """
 
+# Default label mapping for Claude decisions
+DEFAULT_LABEL_MAPPING = {
+    "BUG REPORT - ACTIONABLE": "auto-bug",
+    "BUG REPORT - NOT ACTIONABLE": "auto-needs-information",
+    "OTHER": "auto-other"
+}
+
 def render_prompt(project: str, title: str, body: str) -> str:
     """Render the prompt template with the given variables."""
     template = Template(ISSUE_ANALYSIS_PROMPT)

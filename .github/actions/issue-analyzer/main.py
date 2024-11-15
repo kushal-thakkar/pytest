@@ -3,14 +3,54 @@ import os
 import sys
 import json
 import argparse
-from typing import Dict, Any, Tuple, Optional
+import logging
+from typing import Dict, Any, Tuple, Optional, List
 import re
 from anthropic import Anthropic
 from github import Github
 from github.Issue import Issue
 from github.GithubException import GithubException
 
-from prompt import render_prompt
+from prompt import render_prompt, DEFAULT_LABEL_MAPPING
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+
+def get_label_mapping() -> Dict[str, str]:
+    """Get label mapping from environment or use defaults."""
+    return DEFAULT_LABEL_MAPPING
+
+def extract_decision_tag(analysis: str) -> Optional[str]:
+    """Extract content between <decision> tags if present."""
+    decision_match = re.search(r'<decision>(.*?)</decision>', analysis, re.DOTALL)
+    return decision_match.group(1).strip() if decision_match else None
+
+def should_add_label(issue: Issue) -> bool:
+    """Check if the issue should receive an auto-label."""
+    # If issue already has any labels, don't add more
+    return len(list(issue.get_labels())) == 0
+
+def add_label_to_issue(issue: Issue, decision: str, label_mapping: Dict[str, str]):
+    """Add appropriate label based on Claude's decision."""
+    if not should_add_label(issue):
+        logging.info(f"Issue #{issue.number} already has labels - skipping label addition")
+        return
+        
+    label_name = label_mapping.get(decision.strip())
+    if label_name:
+        try:
+            issue.add_to_labels(label_name)
+            logging.info(f"Added label '{label_name}' to issue #{issue.number}")
+        except GithubException as e:
+            logging.error(f"Failed to add label '{label_name}' to issue #{issue.number}: {e}")
+    else:
+        logging.warning(f"No matching label found for decision: {decision}")
 
 def load_prompt(project: str, title: str, body: str) -> str:
     """Load and format the prompt template."""
@@ -51,7 +91,7 @@ def fetch_issue(repo_name: str, issue_number: int) -> Tuple[str, str]:
         return issue.title, issue.body
         
     except GithubException as e:
-        print(f"GitHub API error: {e}", file=sys.stderr)
+        logger.error(f"GitHub API error: {e}")
         sys.exit(1)
 
 def extract_response_tag(analysis: str) -> Optional[str]:
@@ -116,17 +156,24 @@ def github_workflow_mode():
         )
         
         # Log full response for debugging
-        print("Full Claude Response:")
-        print("=" * 50)
-        print(full_response)
-        print("=" * 50)
+        logger.debug("Full Claude Response:")
+        logger.debug("=" * 50)
+        logger.debug(full_response)
+        logger.debug("=" * 50)
+
+        # Extract decision tag content
+        decision = extract_decision_tag(full_response)
+        if decision:
+            # Get label mapping and add label if appropriate
+            label_mapping = get_label_mapping()
+            add_label_to_issue(issue, decision, label_mapping)
         
         # Only post comment if there's content in response tags
         if response_tag_content:
             post_comment(issue, response_tag_content)
         
     except Exception as e:
-        print(f"Error: {str(e)}", file=sys.stderr)
+        logger.error(f"Error in workflow mode: {str(e)}")
         sys.exit(1)
 
 def local_test_mode(repo: str, issue_number: int):
@@ -140,23 +187,38 @@ def local_test_mode(repo: str, issue_number: int):
         
         # Get analysis from Claude
         full_response, response_tag_content = analyze_issue_with_claude(project, title, body)
+
+        # Extract decision for testing
+        decision = extract_decision_tag(full_response)
         
-        # Print complete analysis for debugging
-        print("\nAnalysis Results")
-        print("=" * 50)
-        print(f"Repository: {repo}")
-        print(f"Issue: #{issue_number}")
-        print(f"Title: {title}")
-        print("-" * 50)
-        print("Full Claude Response:")
-        print(full_response)
-        print("-" * 50)
-        print("Response Tag Content:")
-        print(response_tag_content if response_tag_content else "No response tag content")
-        print("=" * 50)
+        # Log complete analysis for debugging
+        logger.info("\nAnalysis Results")
+        logger.info("=" * 50)
+        logger.info(f"Repository: {repo}")
+        logger.info(f"Issue: #{issue_number}")
+        logger.info(f"Title: {title}")
+        logger.info("-" * 50)
+        logger.info("Full Claude Response:")
+        logger.info(full_response)
+        logger.info("-" * 50)
+        logger.info("Response Tag Content:")
+        logger.info(response_tag_content if response_tag_content else "No response tag content")
+        logger.info("-" * 50)
+        logger.info("Decision Tag Content:")
+        logger.info(decision if decision else "No decision tag content")
+        logger.info("=" * 50)
+
+        # Show what label would be added in non-test mode
+        if decision:
+            label_mapping = get_label_mapping()
+            label = label_mapping.get(decision.strip())
+            if label:
+                logger.info(f"Would add label: {label}")
+            else:
+                logger.warning(f"No matching label found for decision: {decision}")
 
     except Exception as e:
-        print(f"Error in local test mode: {str(e)}", file=sys.stderr)
+        logger.error(f"Error in local test mode: {str(e)}")
         sys.exit(1)
 
 def main():
@@ -168,7 +230,7 @@ def main():
 
     # Check for API keys
     if not os.getenv('ANTHROPIC_API_KEY'):
-        print("Error: ANTHROPIC_API_KEY not set in environment", file=sys.stderr)
+        logger.error("ANTHROPIC_API_KEY not set in environment")
         sys.exit(1)
 
     if args.test:
